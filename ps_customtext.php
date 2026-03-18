@@ -1,4 +1,6 @@
 <?php
+
+declare(strict_types=1);
 /**
  * Copyright since 2007 PrestaShop SA and Contributors
  * PrestaShop is an International Registered Trademark & Property of PrestaShop SA
@@ -35,7 +37,7 @@ require_once _PS_MODULE_DIR_ . 'ps_customtext/classes/CustomText.php';
 class Ps_Customtext extends Module implements WidgetInterface
 {
     // Equivalent module on PrestaShop 1.6, sharing the same data
-    const MODULE_16 = 'blockcmsinfo';
+    public const MODULE_16 = 'blockcmsinfo';
 
     /**
      * @var string Template used by widget
@@ -122,14 +124,16 @@ class Ps_Customtext extends Module implements WidgetInterface
      */
     public function installDB()
     {
-        $return = Db::getInstance()->execute('
+        $return = Db::getInstance()->execute(
+            '
                 CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'info` (
                 `id_info` INT UNSIGNED NOT NULL AUTO_INCREMENT,
                 PRIMARY KEY (`id_info`)
             ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8 ;'
         );
 
-        $return = $return && Db::getInstance()->execute('
+        $return = $return && Db::getInstance()->execute(
+            '
                 CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'info_shop` (
                 `id_info` INT(10) UNSIGNED NOT NULL,
                 `id_shop` INT(10) UNSIGNED NOT NULL,
@@ -137,7 +141,8 @@ class Ps_Customtext extends Module implements WidgetInterface
             ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8 ;'
         );
 
-        $return = $return && Db::getInstance()->execute('
+        $return = $return && Db::getInstance()->execute(
+            '
                 CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'info_lang` (
                 `id_info` INT UNSIGNED NOT NULL,
                 `id_shop` INT(10) UNSIGNED NOT NULL,
