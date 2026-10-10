@@ -14,16 +14,28 @@ source "${ROOT}/tests/bin/file-restore-trap.sh"
   echo ""
 } >> "${RESULTS_FILE}"
 
-# SIGTERM mid-mutation: subprocess must restore via trap
+# SIGTERM mid-mutation: subprocess must restore via trap (bounded parent wait)
 index_expected_hash="$(sha256sum "${ROOT}/index.php" | awk '{print $1}')"
+sigterm_proof_start="$(php -r 'echo microtime(true);')"
 set +e
 bash "${ROOT}/tests/bin/prove-trap-on-sigterm.sh" &
 trap_proof_pid=$!
 sleep 0.5
 kill -TERM "${trap_proof_pid}" 2>/dev/null || true
+trap_proof_wait=124
+sigterm_deadline_epoch="$(php -r 'echo microtime(true) + 10;')"
+while kill -0 "${trap_proof_pid}" 2>/dev/null; do
+  if ! php -r 'exit(microtime(true) < (float)$argv[1] ? 0 : 1);' "${sigterm_deadline_epoch}"; then
+    kill -KILL "${trap_proof_pid}" 2>/dev/null || true
+    echo "SIGTERM proof parent wait timed out after 10s" >&2
+    exit 1
+  fi
+  sleep 0.05
+done
 wait "${trap_proof_pid}" 2>/dev/null
 trap_proof_wait=$?
 set -e
+sigterm_proof_elapsed="$(php -r 'printf("%.3f", microtime(true) - (float)$argv[1]);' "${sigterm_proof_start}")"
 index_actual_hash="$(sha256sum "${ROOT}/index.php" | awk '{print $1}')"
 readable="no"
 if [ -r "${ROOT}/index.php" ] && [ -w "${ROOT}/index.php" ]; then
@@ -36,12 +48,21 @@ fi
 {
   echo "### sigterm-mid-mutation-trap-restore"
   echo "wait_exit: ${trap_proof_wait}"
+  echo "elapsed_seconds: ${sigterm_proof_elapsed}"
   echo "index_content_restored: ${content_clean}"
   echo "index_php_readable: ${readable}"
   echo ""
 } >> "${RESULTS_FILE}"
 if [ "${content_clean}" != "yes" ] || [ "${readable}" != "yes" ]; then
   echo "SIGTERM trap proof failed" >&2
+  exit 1
+fi
+if ! php -r 'exit((float)$argv[1] <= 2.0 ? 0 : 1);' "${sigterm_proof_elapsed}"; then
+  echo "SIGTERM proof took longer than 2.0s (${sigterm_proof_elapsed}s)" >&2
+  exit 1
+fi
+if [ "${trap_proof_wait}" -ne 143 ]; then
+  echo "SIGTERM proof expected wait exit 143, got ${trap_proof_wait}" >&2
   exit 1
 fi
 
