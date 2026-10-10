@@ -82,7 +82,7 @@ if [ "${wrong_code}" -eq 0 ]; then
   exit 1
 fi
 
-if [ "${RUN_PROOFS:-1}" = "1" ]; then
+if [ "${RUN_PROOFS:-0}" = "1" ]; then
   docker run --rm --network "container:${MARIADB_NAME}" \
     -v "${ROOT}:/src" \
     -v "${PHAR_CACHE_DIR}:/phar-cache" \
@@ -95,9 +95,22 @@ if [ "${RUN_PROOFS:-1}" = "1" ]; then
     -e PHPUNIT_PHAR_PATH=/phar-cache/phpunit-4.8.36.phar \
     "${PHP_TAG}" \
     bash tests/bin/run-stage-proofs.sh
+  host_git_status="$(git -C "${ROOT}" status --short 2>&1 || true)"
+  {
+    echo "## Host tree after RUN_PROOFS"
+    echo "git_status_empty: $( [ -z "${host_git_status}" ] && echo yes || echo no )"
+    echo '```'
+    echo "${host_git_status:-<empty>}"
+    echo '```'
+    echo ""
+  } >> /opt/cursor/artifacts/suite-results.md
+  if [ -n "${host_git_status}" ]; then
+    echo "Host git tree not clean after proofs" >&2
+    exit 1
+  fi
 fi
 
-if [ "${RUN_MUTATIONS:-1}" = "1" ]; then
+if [ "${RUN_MUTATIONS:-0}" = "1" ]; then
   docker run --rm --network "container:${MARIADB_NAME}" \
     -v "${ROOT}:/src" \
     -v /opt/cursor/artifacts:/opt/cursor/artifacts \
@@ -111,6 +124,19 @@ if [ "${RUN_MUTATIONS:-1}" = "1" ]; then
     -e PHPUNIT_PHAR_PATH=/phar-cache/phpunit-4.8.36.phar \
     "${PHP_TAG}" \
     bash tests/bin/run-mutations.sh
+  host_git_status="$(git -C "${ROOT}" status --short 2>&1 || true)"
+  {
+    echo "## Host tree after RUN_MUTATIONS"
+    echo "git_status_empty: $( [ -z "${host_git_status}" ] && echo yes || echo no )"
+    echo '```'
+    echo "${host_git_status:-<empty>}"
+    echo '```'
+    echo ""
+  } >> /opt/cursor/artifacts/suite-results.md
+  if [ -n "${host_git_status}" ]; then
+    echo "Host git tree not clean after mutations" >&2
+    exit 1
+  fi
 fi
 
 docker rm -f "${MARIADB_NAME}" >/dev/null 2>&1 || true

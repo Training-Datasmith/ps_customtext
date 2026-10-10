@@ -7,21 +7,26 @@ cd "${ROOT}"
 PHPUNIT="${PHPUNIT_PHAR_PATH:-/tmp/phpunit-4.8.36.phar}"
 RESULTS_FILE="/opt/cursor/artifacts/suite-results.md"
 MIGRATE="${ROOT}/classes/MigrateData.php"
-MIGRATE_BAK="$(mktemp)"
-cp "${MIGRATE}" "${MIGRATE_BAK}"
+CUSTOM="${ROOT}/classes/CustomText.php"
+MODULE="${ROOT}/ps_customtext.php"
+
+# shellcheck source=tests/bin/file-restore-trap.sh
+source "${ROOT}/tests/bin/file-restore-trap.sh"
 
 {
   echo "## Revert-prove (empty-intersect guard)"
   echo ""
 } >> "${RESULTS_FILE}"
 
-cp "${ROOT}/classes/MigrateData.php" "${MIGRATE_BAK}"
-sed -i '/if (empty($customTexts)) {/,+2d' "${ROOT}/classes/MigrateData.php"
+revert_backup_dir="$(mktemp -d)"
+trap_restore_init "${revert_backup_dir}"
+trap_restore_register "${MIGRATE}"
+sed -i '/if (empty($customTexts)) {/,+2d' "${MIGRATE}"
 set +e
 revert_out="$(php "${PHPUNIT}" -c phpunit.xml.dist tests/Unit/MigrateDataTest.php --filter testInsertDataNoActiveShopMatchReturnsTrueWithNoRows 2>&1)"
 revert_code=$?
 set -e
-cp "${MIGRATE_BAK}" "${ROOT}/classes/MigrateData.php"
+trap_restore_finish
 {
   echo "without_guard_exit_code: ${revert_code}"
   echo '```'
@@ -35,22 +40,25 @@ if [ "${revert_code}" -eq 0 ]; then
 fi
 
 {
-  echo "## Mutation checks"
+  echo "## Mutation checks (RUN_MUTATIONS=1)"
   echo ""
 } >> "${RESULTS_FILE}"
 
 mutate_and_expect_failure() {
   local name="$1"
   local file="$2"
-  local backup="$3"
-  local test_cmd="$4"
-  cp "${file}" "${backup}"
-  eval "$5"
+  local test_cmd="$3"
+  local mutate_cmd="$4"
+  local mutation_backup_dir
+  mutation_backup_dir="$(mktemp -d)"
+  trap_restore_init "${mutation_backup_dir}"
+  trap_restore_register "${file}"
+  eval "${mutate_cmd}"
   set +e
   output="$(eval "${test_cmd}" 2>&1)"
   code=$?
   set -e
-  cp "${backup}" "${file}"
+  trap_restore_finish
   {
     echo "### ${name}"
     echo "exit_code: ${code}"
@@ -65,30 +73,24 @@ mutate_and_expect_failure() {
   fi
 }
 
-CUSTOM="${ROOT}/classes/CustomText.php"
-CUSTOM_BAK="$(mktemp)"
-MODULE="${ROOT}/ps_customtext.php"
-MODULE_BAK="$(mktemp)"
-
-mutate_and_expect_failure "mutation-remove-empty-intersect-guard" "${MIGRATE}" "${MIGRATE_BAK}" \
+mutate_and_expect_failure "mutation-remove-empty-intersect-guard" "${MIGRATE}" \
   "php \"${PHPUNIT}\" -c phpunit.xml.dist tests/Unit/MigrateDataTest.php --filter testInsertDataNoActiveShopMatchReturnsTrueWithNoRows" \
   "sed -i '/if (empty(\$customTexts)) {/,+2d' \"${MIGRATE}\""
 
-mutate_and_expect_failure "mutation-upgrade-orphan-without-guard" "${MIGRATE}" "${MIGRATE_BAK}" \
+mutate_and_expect_failure "mutation-upgrade-orphan-without-guard" "${MIGRATE}" \
   "php \"${PHPUNIT}\" -c phpunit.xml.dist tests/Unit/UpgradeModule300Test.php --filter testUpgradeOrphanShopReturnsTrueWithNoRows" \
   "sed -i '/if (empty(\$customTexts)) {/,+2d' \"${MIGRATE}\""
 
-mutate_and_expect_failure "mutation-break-retrieve-join" "${MIGRATE}" "${MIGRATE_BAK}" \
+mutate_and_expect_failure "mutation-break-retrieve-join" "${MIGRATE}" \
   "php \"${PHPUNIT}\" -c phpunit.xml.dist tests/Unit/MigrateDataTest.php --filter testRetrieveOldDataMapsSchema" \
   "sed -i 's/il.\`id_lang\`/il.\`id_langx\`/' \"${MIGRATE}\""
 
-mutate_and_expect_failure "mutation-definition-multilang" "${CUSTOM}" "${CUSTOM_BAK}" \
+mutate_and_expect_failure "mutation-definition-multilang" "${CUSTOM}" \
   "php \"${PHPUNIT}\" -c phpunit.xml.dist tests/Unit/CustomTextTest.php --filter testDefinitionContract" \
   "sed -i \"s/'multilang' => true/'multilang' => false/\" \"${CUSTOM}\""
 
-mutate_and_expect_failure "mutation-widget-missing-row" "${MODULE}" "${MODULE_BAK}" \
+mutate_and_expect_failure "mutation-widget-missing-row" "${MODULE}" \
   "php \"${PHPUNIT}\" -c phpunit.xml.dist tests/Unit/PsCustomtextWidgetTest.php --filter testGetWidgetVariablesFalseWhenMissing" \
   "sed -i '/\$idInfo === false/,+1s/return false/return array(\"cms_infos\" => array());/' \"${MODULE}\""
 
-rm -f "${MIGRATE_BAK}" "${CUSTOM_BAK}" "${MODULE_BAK}"
 echo "Mutations completed (5 checks, production restored)" >> "${RESULTS_FILE}"

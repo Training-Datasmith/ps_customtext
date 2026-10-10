@@ -6,21 +6,56 @@ cd "${ROOT}"
 RESULTS_FILE="/opt/cursor/artifacts/suite-results.md"
 PHPUNIT="${PHPUNIT_PHAR_PATH:-/tmp/phpunit-4.8.36.phar}"
 
+# shellcheck source=tests/bin/file-restore-trap.sh
+source "${ROOT}/tests/bin/file-restore-trap.sh"
+
 {
-  echo "## Stage 4b requirement proofs"
+  echo "## Stage proofs (RUN_PROOFS=1)"
   echo ""
 } >> "${RESULTS_FILE}"
 
+# SIGTERM mid-mutation: subprocess must restore via trap
+index_expected_hash="$(sha256sum "${ROOT}/index.php" | awk '{print $1}')"
+set +e
+bash "${ROOT}/tests/bin/prove-trap-on-sigterm.sh" &
+trap_proof_pid=$!
+sleep 0.5
+kill -TERM "${trap_proof_pid}" 2>/dev/null || true
+wait "${trap_proof_pid}" 2>/dev/null
+trap_proof_wait=$?
+set -e
+index_actual_hash="$(sha256sum "${ROOT}/index.php" | awk '{print $1}')"
+readable="no"
+if [ -r "${ROOT}/index.php" ] && [ -w "${ROOT}/index.php" ]; then
+  readable="yes"
+fi
+content_clean="no"
+if [ "${index_expected_hash}" = "${index_actual_hash}" ] && tail -n 1 "${ROOT}/index.php" | grep -q 'exit;'; then
+  content_clean="yes"
+fi
+{
+  echo "### sigterm-mid-mutation-trap-restore"
+  echo "wait_exit: ${trap_proof_wait}"
+  echo "index_content_restored: ${content_clean}"
+  echo "index_php_readable: ${readable}"
+  echo ""
+} >> "${RESULTS_FILE}"
+if [ "${content_clean}" != "yes" ] || [ "${readable}" != "yes" ]; then
+  echo "SIGTERM trap proof failed" >&2
+  exit 1
+fi
+
 # Missing pinned file must fail shuffled runner
 missing="${ROOT}/tests/Unit/PsCustomtextWidgetTest.php"
-bak="$(mktemp)"
-cp "${missing}" "${bak}"
+delete_backup_dir="$(mktemp -d)"
+trap_restore_init "${delete_backup_dir}"
+trap_restore_register "${missing}"
 rm -f "${missing}"
 set +e
 missing_out="$(php tests/bin/run-shuffled.php 2>&1)"
 missing_code=$?
 set -e
-mv "${bak}" "${missing}"
+trap_restore_finish
 {
   echo "### delete-pinned-file-shuffle"
   echo "exit_code: ${missing_code}"
@@ -39,16 +74,16 @@ prove_exit_to_return() {
   local test_file="$2"
   local filter="$3"
   local label="$4"
-  local backup
-  backup="$(mktemp)"
-  cp "${target}" "${backup}"
+  local proof_backup_dir
+  proof_backup_dir="$(mktemp -d)"
+  trap_restore_init "${proof_backup_dir}"
+  trap_restore_register "${target}"
   sed -i 's/\bexit;/return;/' "${target}"
   set +e
   out="$(php "${PHPUNIT}" -c phpunit.xml.dist "${test_file}" --filter "${filter}" 2>&1)"
   code=$?
   set -e
-  cp "${backup}" "${target}"
-  rm -f "${backup}"
+  trap_restore_finish
   {
     echo "### exit-to-return-${label}"
     echo "exit_code: ${code}"
@@ -68,6 +103,7 @@ upgrade_test="${ROOT}/tests/Unit/UpgradeModule300Test.php"
 prove_exit_to_return "${ROOT}/index.php" "${module_test}" "testWebEntryPointIncludeGuardsUseExit" "root-index"
 prove_exit_to_return "${ROOT}/translations/index.php" "${module_test}" "testWebEntryPointIncludeGuardsUseExit" "translations-index"
 prove_exit_to_return "${ROOT}/upgrade/index.php" "${module_test}" "testWebEntryPointIncludeGuardsUseExit" "upgrade-index"
+prove_exit_to_return "${ROOT}/ps_customtext.php" "${module_test}" "testWebEntryPointIncludeGuardsUseExit" "ps-customtext-module"
 prove_exit_to_return "${ROOT}/upgrade/install-3.0.0.php" "${upgrade_test}" "testUpgradeInstallScriptGuardUsesExit" "upgrade-install-script"
 
-echo "Stage 4b container proofs passed" >> "${RESULTS_FILE}"
+echo "Stage proofs passed" >> "${RESULTS_FILE}"
