@@ -37,6 +37,21 @@ class UpgradeModule300Test extends PHPUnit_Framework_TestCase
         $this->assertSame(0, (int) $db->getValue('SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'info`'));
     }
 
+    public function testUpgradeInstallScriptGuardUsesExit()
+    {
+        $path = dirname(dirname(__DIR__)) . '/upgrade/install-3.0.0.php';
+        $cmd = 'php -r ' . escapeshellarg(
+            'echo "BEFORE\n"; include ' . var_export($path, true) . '; echo "AFTER\n";'
+        );
+        $output = array();
+        $exitCode = 0;
+        exec($cmd . ' 2>&1', $output, $exitCode);
+        $joined = implode("\n", $output);
+        $this->assertSame(0, $exitCode);
+        $this->assertContains('BEFORE', $joined);
+        $this->assertNotContains('AFTER', $joined);
+    }
+
     public function testUpgradeReturnsFalseWhenUninstallDbFails()
     {
         PrestaShopHarness::ensureEmptyOldSchemaTables();

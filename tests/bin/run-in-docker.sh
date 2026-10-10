@@ -40,17 +40,14 @@ if [[ "${version}" != 10.11.14* ]]; then
   exit 1
 fi
 
-docker build -t "${PHP_TAG}" -f tests/docker/Dockerfile tests/docker
-
-docker run --rm \
-  -v "${ROOT}:/src" \
-  -v "${PHAR_CACHE_DIR}:/phar-cache" \
-  -w /src \
-  -e PHPUNIT_PHAR_PATH=/phar-cache/phpunit-4.8.36.phar \
-  "${PHP_TAG}" \
-  bash tests/bin/verify-phpunit-phar.sh
-
+if ! command -v gpg >/dev/null 2>&1; then
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gnupg ca-certificates curl
+fi
+export PHPUNIT_PHAR_PATH="${PHAR_CACHE_DIR}/phpunit-4.8.36.phar"
 mkdir -p /opt/cursor/artifacts
+bash tests/bin/verify-phpunit-phar.sh
+
+docker build -t "${PHP_TAG}" -f tests/docker/Dockerfile tests/docker
 
 docker run --rm --network "container:${MARIADB_NAME}" \
   -v "${ROOT}:/src" \
@@ -67,6 +64,38 @@ docker run --rm --network "container:${MARIADB_NAME}" \
   -e GIT_COMMIT="$(git -C "${ROOT}" rev-parse HEAD)" \
   "${PHP_TAG}" \
   bash -lc 'php -r "if (PHP_VERSION !== \"5.6.40\") { fwrite(STDERR, PHP_VERSION); exit(1);}" && bash tests/bin/run-gate.sh'
+
+set +e
+wrong_out="$(EXPECTED_FINGERPRINT=0000000000000000000000000000000000000000 bash tests/bin/verify-phpunit-phar.sh 2>&1)"
+wrong_code=$?
+set -e
+{
+  echo "## Host proof: wrong GPG fingerprint"
+  echo "exit_code: ${wrong_code}"
+  echo '```'
+  echo "${wrong_out}" | tail -n 5
+  echo '```'
+  echo ""
+} >> /opt/cursor/artifacts/suite-results.md
+if [ "${wrong_code}" -eq 0 ]; then
+  echo "Wrong fingerprint proof failed: verify succeeded" >&2
+  exit 1
+fi
+
+if [ "${RUN_PROOFS:-1}" = "1" ]; then
+  docker run --rm --network "container:${MARIADB_NAME}" \
+    -v "${ROOT}:/src" \
+    -v "${PHAR_CACHE_DIR}:/phar-cache" \
+    -v /opt/cursor/artifacts:/opt/cursor/artifacts \
+    -w /src \
+    -e PS_CUSTOMTEXT_DB_HOST=127.0.0.1 \
+    -e PS_CUSTOMTEXT_DB_USER=ps_customtext \
+    -e PS_CUSTOMTEXT_DB_PASSWORD=ps_customtext \
+    -e PS_CUSTOMTEXT_DB_NAME=ps_customtext_test \
+    -e PHPUNIT_PHAR_PATH=/phar-cache/phpunit-4.8.36.phar \
+    "${PHP_TAG}" \
+    bash tests/bin/run-stage-proofs.sh
+fi
 
 if [ "${RUN_MUTATIONS:-1}" = "1" ]; then
   docker run --rm --network "container:${MARIADB_NAME}" \

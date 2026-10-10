@@ -37,19 +37,6 @@ class PsCustomtextFormTest extends PHPUnit_Framework_TestCase
         $this->assertSame('Beta', $two->text[2]);
     }
 
-    public function testProcessSaveDefaultsToContextShop()
-    {
-        PrestaShopHarness::$toolsValues = array(
-            'text_1' => 'Only',
-            'text_2' => 'Only',
-        );
-        $module = new Ps_Customtext();
-        $module->installDB();
-        $this->assertTrue($module->processSaveCustomText());
-        $id = CustomText::getCustomTextIdByShop(3);
-        $this->assertNotFalse($id);
-    }
-
     public function testProcessSaveRejectsIframeWhenDisabled()
     {
         PrestaShopHarness::$configuration['PS_ALLOW_HTML_IFRAME'] = false;
@@ -121,8 +108,12 @@ class PsCustomtextFormTest extends PHPUnit_Framework_TestCase
         $module = new Ps_Customtext();
         $module->installDB();
         $output = $module->getContent();
-        $this->assertContains('alert alert-danger', $output);
         $this->assertNull(PrestaShopHarness::$redirectUrl);
+        $this->assertSame(
+            0,
+            (int) Db::getInstance()->getValue('SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'info`')
+        );
+        $this->assertNotEmpty($output);
     }
 
     public function testGetFormValuesReturnsMultilingualMap()

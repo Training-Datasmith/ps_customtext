@@ -6,8 +6,17 @@ if (!is_dir($fakeModulesDir)) {
     mkdir($fakeModulesDir, 0777, true);
 }
 $moduleLink = $fakeModulesDir . '/ps_customtext';
-if (!file_exists($moduleLink)) {
-    symlink($repoRoot, $moduleLink);
+$repoRootReal = realpath($repoRoot);
+if ($repoRootReal === false) {
+    throw new RuntimeException('Cannot resolve repository root for fake module path');
+}
+if (is_link($moduleLink)) {
+    if (readlink($moduleLink) !== $repoRootReal) {
+        unlink($moduleLink);
+        symlink($repoRootReal, $moduleLink);
+    }
+} elseif (!file_exists($moduleLink)) {
+    symlink($repoRootReal, $moduleLink);
 }
 
 if (!defined('_PS_VERSION_')) {

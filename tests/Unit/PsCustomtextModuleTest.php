@@ -29,19 +29,27 @@ class PsCustomtextModuleTest extends PHPUnit_Framework_TestCase
         $this->assertSame('blockcmsinfo', Ps_Customtext::MODULE_16);
     }
 
-    public function testGuardExitsWithoutPrestaShopVersion()
+    public function testWebEntryPointIncludeGuardsUseExit()
     {
         $repo = dirname(dirname(__DIR__));
-        $cmd = 'php -r ' . escapeshellarg(
-            'echo "BEFORE\n"; include ' . var_export($repo . '/ps_customtext.php', true) . '; echo "AFTER\n";'
+        $paths = array(
+            $repo . '/index.php',
+            $repo . '/translations/index.php',
+            $repo . '/upgrade/index.php',
+            $repo . '/ps_customtext.php',
         );
-        $output = array();
-        $exitCode = 0;
-        exec($cmd . ' 2>&1', $output, $exitCode);
-        $joined = implode("\n", $output);
-        $this->assertSame(0, $exitCode);
-        $this->assertContains('BEFORE', $joined);
-        $this->assertNotContains('AFTER', $joined);
+        foreach ($paths as $path) {
+            $cmd = 'php -r ' . escapeshellarg(
+                'echo "BEFORE\n"; include ' . var_export($path, true) . '; echo "AFTER\n";'
+            );
+            $output = array();
+            $exitCode = 0;
+            exec($cmd . ' 2>&1', $output, $exitCode);
+            $joined = implode("\n", $output);
+            $this->assertSame(0, $exitCode, $path);
+            $this->assertContains('BEFORE', $joined, $path);
+            $this->assertNotContains('AFTER', $joined, $path);
+        }
     }
 
     public function testInstallWithoutLegacyModule()
